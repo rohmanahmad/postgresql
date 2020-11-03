@@ -19,11 +19,21 @@ const operatorsMap = {
     '$lt': '<',
     '$lte': '<=',
     '$gt': '>',
-    '$gte': '>='
+    '$gte': '>=',
+    '$in': 'IN'
 }
 
 class Builder {
     constructor () {
+        this.reset()
+    }
+
+    /* RESET ALL VALUES */
+    reset () {
+        this.use_prepare_statement = false
+        this.is_select_query = false
+        this.is_update_query = false
+        this.field_value_object = {}
         this.t_select = []
         this.t_keys = {} // untuk indexing berisi key {'user_name': '$1', 'user_email': '$2']
         this.t_where_and = []
@@ -50,8 +60,16 @@ class Builder {
     /**
      * @description only used for prepared query
      */
-    prepare () {
+    prepare (type = 'select') {
+        this.reset() // set to default value
         this.use_prepare_statement = true
+        if (type === 'select') this.is_select_query = true
+        else if (type === 'update') this.is_update_query = true
+        return this
+    }
+
+    from (tableName = '') {
+        this.fromTable = tableName
         return this
     }
 
@@ -113,8 +131,8 @@ class Builder {
      */
     orWhere (object = {}) {
         const type = 'or'
-        let operator = '='
         for (const key in object) {
+            let operator = '='
             let value = object[key]
             if (key && value) {
                 if (typeof value === 'object') {
@@ -161,26 +179,30 @@ class Builder {
     /**
      * @description used for build all prepared statement object and generating to sql statement
      */
-    buildQuery () {
+    buildQuery (options = {}) {
+        let { initValues } = options
         const sql = []
-        const values = []
+        let values = !initValues ? [] : initValues
         if (this.is_select_query) {
             const fields = this.t_select.join(', ')
-            sql.push(`SELECT ${fields} FROM ${this.tableName}`)
+            sql.push(`SELECT ${fields} FROM ${this.fromTable || this.tableName}`)
         } else if (this.is_update_query) {
             sql.push(`UPDATE ${this.tableName} SET`)
-            const {stringFieldAndValue, values: v} = this.getFieldAndValues({})
+            const {stringFieldAndValue, values: newValues1} = this.getFieldAndValues({initValues})
             if (Array.isArray(stringFieldAndValue)) sql.push(...(stringFieldAndValue || []))
-            if (Array.isArray(v)) values.push(...(v || []))
+            values = newValues1
+            if (this.fromTable) sql.push(`FROM ${this.fromTable}`)
+            // untuk updateone tidak di masukkan where disini, krn harus select one dlu lalu di update
+            // untuk update yg many, tidak ada masalah menggunakan .where()
         }
-        const {where, mapValueSequence} = this.generateCriterias({initValues: values})
-        if (Array.isArray(where)) sql.push(...(where || []))
-        if (Array.isArray(mapValueSequence)) values.push(...(mapValueSequence || []))
+        const {sql: sqlCriteria, values: newValues2} = this.generateCriterias({initValues: values})
+        if (Array.isArray(sqlCriteria)) sql.push(...sqlCriteria)
         if (this.is_select_query || this.is_update_query) {
             const limitOffsets = this.getLimitAndOffset()
             if (Array.isArray(limitOffsets)) sql.push(...(limitOffsets || []))
         }
-        return {sql, values: mapValueSequence}
+        // biarkan sql bertype Array krn ada beberapa yang dibutuhkan untuk menambah item spt updateOne
+        return {sql, values: newValues2}
     }
 
     /**
@@ -199,8 +221,20 @@ class Builder {
             stringFieldAndValue.push(`${fvo} = $${n}`)
             val.push(this.field_value_object[fvo])
         }
-        debugger
         return {stringFieldAndValue, values: val}
+    }
+
+    data (data) {
+        this.field_value_object = {}
+        if (Object.keys(data).length > 0) {
+            const keys = this.getAllkeys()
+            for (const f in data) {
+                if (keys.indexOf(f) > -1) {
+                    this.field_value_object[f] = data[f]
+                }
+            }
+        }
+        return this
     }
 
     /**
@@ -218,59 +252,85 @@ class Builder {
      * @param {object} param0 default { initvalues = [] }
      */
     generateCriterias ({initValues = []}) {
-        let where = []
+        let sql = []
         const wAND = this.t_where_and
         const wOR = this.t_where_or
         const initSize = initValues.length
         let sequence = initSize + 1
-        const kurung = ['(', ')']
         const wANDsize = wAND.length
         const wORsize = wOR.length
-        let mapValueSequence = [...initValues]
+        let newValues = [...initValues]
         if (wANDsize > 0) {
-            if (sequence - initSize === 1) where.push('WHERE')
+            if (sequence - initSize === 1) sql.push('WHERE')
             let s = 1
             for (const obj of wAND) {
                 const key = Object.keys(obj)[0]
                 const type = obj[key]['type'].toUpperCase()
                 const val = obj[key]['value']
                 const op = obj[key]['operator']
-                if (sequence - initSize > 1) where.push(type)
+                if (sequence - initSize > 1) sql.push(type)
                 const k0 = '' // (s === 1 ? kurung[0] : '')
                 const k1 = '' // (s === wANDsize ? kurung[1] : '')
                 if (op === 'IN') {
-                    where.push(`${k0}${key} ${op} ($${sequence})${k1}`)
-                    mapValueSequence.push(val.join())
+                    sql.push(`${k0}${key} ${op} ($${sequence})${k1}`)
+                    newValues.push(val.join())
                 } else {
-                    where.push(`${k0}${key} ${op} $${sequence}${k1}`)
-                    mapValueSequence.push(val)
+                    sql.push(`${k0}${key} ${op} $${sequence}${k1}`)
+                    newValues.push(val)
                 }
                 sequence += 1
                 s += 1
             }
         }
         if (wORsize > 0) {
-            if (sequence - initSize === 1) where.push('WHERE')
+            if (sequence - initSize === 1) sql.push('WHERE')
             let s = 1
             for (const obj of wOR) {
                 const key = Object.keys(obj)[0]
                 const type = obj[key]['type'].toUpperCase()
                 const val = obj[key]['value']
-                const op = obj[key]['operator']
-                // if (s === 1) where.push('(')
-                if (sequence - initSize > 1) where.push(type)
+                const op = obj[key]['operator'] || '='
+                // if (s === 1) sql.push('(')
+                if (sequence - initSize > 1) sql.push(type)
                 const k1 = '' //(s === wORsize ? kurung[1] : '')
-                if (op === 'IN') {
-                    where.push(`${key} ${op} ($${sequence})${k1}`)
+                if (!op) {
+                    console.error(obj[key])
+                } else if (op === 'IN') {
+                    sql.push(`${key} ${op} ($${sequence})${k1}`)
                 } else {
-                    where.push(`${key} ${op} $${sequence}${k1}`)
+                    sql.push(`${key} ${op} $${sequence}${k1}`)
                 }
-                mapValueSequence.push(val)
+                newValues.push(val)
                 sequence += 1
                 s += 1
             }
         }
-        return { where, mapValueSequence }
+        return { sql, values: newValues }
+    }
+}
+
+class BaseModel extends Builder {
+    constructor () {
+        super()
+        this.whereClauses = []
+        this.values = []
+    }
+
+    async execute (sql, values) {
+        try {
+            if (!sql) {
+                const builder = this.buildQuery()
+                sql = builder.sql
+                values = builder.values
+            }
+            if (typeof sql !== 'string') sql = sql.join(' ')
+            console.logger('running query:', {sql, values})
+            const q = await connectionPool.query(sql, values)
+            return q
+        } catch (err) {
+            console.error(err)
+            return null
+        }
     }
 
     /* STANDALONE FUNCTIONS BUT STILL USING PREPARED STATEMENT */
@@ -282,24 +342,29 @@ class Builder {
      */
     async updateOne (criteria = {}, updates = {}, options = {}) {
         try {
-            const selectStatement = this
-                .prepare()
-                .select(['*'])
+            const sqlupdate = []
+            const {sql: sqlFrom, values: valFrom} = this
+                .prepare('select')
+                .select(['id'])
+                .limit(1)
                 .where(criteria) // preparing where statement for selecting data
-                .buildQuery()
-            this.is_update_query = true // setup options to update query
-            console.log({selectStatement})
-            if (Object.keys(updates).length > 0) {
-                this.field_value_object = {}
-                const keys = this.getAllkeys()
-                for (const f in updates) {
-                    console.log('f:', f)
-                    if (keys.indexOf(f) > -1) {
-                        this.field_value_object[f] = updates[f]
-                    }
-                }
-            }
-            return this
+                .buildQuery({}) // values(type Array) akan melanjutkan urutan sesuai size yg sudah didefinisikan
+            sqlupdate.push(`with cte as`)
+            sqlupdate.push('(')
+            if (Array.isArray(sqlFrom)) sqlupdate.push(...sqlFrom)
+            sqlupdate.push(')')
+            const {sql, values} = this
+                .prepare('update')
+                .data(updates)
+                .from('cte') // krn menggunakan alias
+                // .where({
+                //     'cte.id': `${this.tableName}.id`
+                // })
+                .buildQuery({initValues: valFrom})
+            if (Array.isArray(sql)) sqlupdate.push(...sql)
+            sqlupdate.push(`WHERE cte.id = ${this.tableName}.id`)
+            const data = await this.execute(sqlupdate, values)
+            return data
         } catch (err) {
             throw err
         }
@@ -342,28 +407,6 @@ class Builder {
             return data
         } catch (err) {
             throw err
-        }
-    }
-}
-
-class BaseModel extends Builder {
-    constructor () {
-        super()
-        this.whereClauses = []
-        this.values = []
-    }
-
-    async execute () {
-        try {
-            let {sql, values } = this.buildQuery()
-            if (typeof sql !== 'string') sql = sql.join(' ')
-            console.logger('running query:', {sql, values})
-            const q = await connectionPool.query(sql, values)
-            await connectionPool.end()
-            return q
-        } catch (err) {
-            console.error(err)
-            return null
         }
     }
 

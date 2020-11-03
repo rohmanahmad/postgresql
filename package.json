@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon -x \"rsync -azvP * ../backend-app/node_modules/pobmodels/node_modules/postgresql-orm\" -w"
   },
   "repository": {
     "type": "git",
