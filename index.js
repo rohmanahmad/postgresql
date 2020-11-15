@@ -69,6 +69,7 @@ class Builder {
         this.use_prepare_statement = true
         if (type === 'select') this.is_select_query = true
         else if (type === 'update') this.is_update_query = true
+        else if (type === 'deleteone') this.is_deleteone_query = true
         return this
     }
 
@@ -226,6 +227,8 @@ class Builder {
             if (this.fromTable) sql.push(`FROM ${this.fromTable}`)
             // untuk updateone tidak di masukkan where disini, krn harus select one dlu lalu di update
             // untuk update yg many, tidak ada masalah menggunakan .where()
+        } else if (this.is_deleteone_query) {
+            sql.push(`DELETE FROM ${this.tableName}`)
         }
         const {sql: sqlCriteria, values: newValues2} = this.generateCriterias({initValues: values})
         if (Array.isArray(sqlCriteria)) sql.push(...sqlCriteria)
@@ -429,9 +432,9 @@ class BaseModel extends Builder {
                 preparedMap.push(`$${mapValue}`)
                 mapValue += 1
             }
-            const sql = `INSERT INTO ${this.tableName} (${keys.join()}) values (${preparedMap.join(',')})`
+            const sql = `INSERT INTO ${this.tableName} (${keys.join()}) values (${preparedMap.join(',')}) RETURNING id`
             const q = await this.execute(sql, values)
-            return q
+            return result(q, 'rows[0].id', null)
         } catch (err) {
             throw err
         }
@@ -439,7 +442,12 @@ class BaseModel extends Builder {
 
     async deleteOne (criterias = {}) {
         try {
-            if (Object.keys(criterias).length > 0) this.where(criterias)
+            if (Object.keys(criterias).length === 0) throw new Error('DeleteOne Need atlease One criteria')
+            await this
+                .prepare('deleteone')
+                .where(criterias)
+                .limit(1)
+                .execute()
         } catch (err) {
             throw err
         }

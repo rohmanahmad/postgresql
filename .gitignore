@@ -1,3 +1,5 @@
+sync.sh
+deployDev
 # Logs
 logs
 *.log

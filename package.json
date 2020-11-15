@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon -x \"rsync -azvP * ~/Projects/StartUp/SalesApp/backend-app/node_modules/pobmodels/node_modules/postgresql-orm\" -w"
+    "dev": "nodemon -x \"sh sync.sh\" -w"
   },
   "repository": {
     "type": "git",
