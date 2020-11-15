@@ -4,6 +4,7 @@ const {Pool} = require('pg')
 const connectionPool = new Pool({
     connectionString: process.env.POSTGRESQL_DSN
 })
+const {result} = require('lodash')
 const acceptedOperators = [
     '$eq',
     '$lt',
@@ -12,7 +13,8 @@ const acceptedOperators = [
     '$gte',
     '$in',
     '$or',
-    '$and'
+    '$and',
+    '$like'
 ]
 const operatorsMap = {
     '$eq': '=',
@@ -20,7 +22,8 @@ const operatorsMap = {
     '$lte': '<=',
     '$gt': '>',
     '$gte': '>=',
-    '$in': 'IN'
+    '$in': 'IN',
+    '$like': 'LIKE'
 }
 
 class Builder {
@@ -39,6 +42,7 @@ class Builder {
         this.t_where_and = []
         this.t_where_or = []
         this.t_join = []
+        this.t_sort = []
         this.t_limit = 0
         this.t_offset = 0
     }
@@ -77,11 +81,12 @@ class Builder {
      * @param {array} keys default new Array('*')
      * @description setup keys / fields which used to view
      */
-    select (keys = ['*']) {
+    select (keys = ['*'], noValidation = false) {
         this.is_select_query = true // untuk pengecekan dari builder
         const allKeys = this.getAllkeys()
         for (const k of keys) {
-            if (k === '*' || allKeys.indexOf(k) > -1) {
+            const key = k.split('.')[1] || k.split('.')[0]
+            if (k === '*' || allKeys.indexOf(key) > -1 || noValidation) {
                 this.t_select.push(k)
             }
         }
@@ -89,13 +94,15 @@ class Builder {
     }
 
     /**
-     * @param {string} key 
-     * @param {*} value 
+     * @param {object} object
+     * @param {boolean} sqlReturned default false
      * @description set "AND" statement variables
      */  
-    where (object = {}) {
+    where (object = {}, sqlReturned = false) {
+        if (typeof object !== 'object') throw new Error('parameter pertama harus object {key: value}')
         const type = 'and'
         for (const key in object) {
+            console.log('-->', key, object[key])
             let value = object[key]
             if (key && value) {
                 if (typeof value === 'object') {
@@ -121,6 +128,11 @@ class Builder {
                     })
                 }
             }
+        }
+        if (sqlReturned) {
+            console.log(this.t_where_and, this.t_where_or)
+            const {sql, values} = this.generateCriterias({})
+            return {sql: sql.join(' '), values}
         }
         return this
     }
@@ -175,6 +187,20 @@ class Builder {
         return this
     }
 
+    join (type = 'left', fromTable, args) {
+        if (!fromTable) throw new Error('Required second paramater')
+        if (!args) throw new Error('Required third paramater')
+        this.t_join.push({type, fromTable, args})
+        console.log({type, fromTable, args})
+        return this
+    }
+
+    sort (key, dir = 'DESC') {
+        if (!key) throw new Error('Key Is Required For Sorting')
+        this.t_sort.push({key, dir})
+        return this
+    }
+
     /* END OF PREPARED FUNCTIONS CHAIN */
     /**
      * @description used for build all prepared statement object and generating to sql statement
@@ -186,6 +212,12 @@ class Builder {
         if (this.is_select_query) {
             const fields = this.t_select.join(', ')
             sql.push(`SELECT ${fields} FROM ${this.fromTable || this.tableName}`)
+            if (this.t_join.length > 0) {
+                for (const j of this.t_join) {
+                    sql.push(`${j.type.toUpperCase()} JOIN ${j.fromTable}`)
+                    sql.push(`ON ${j.args}`)
+                }
+            }
         } else if (this.is_update_query) {
             sql.push(`UPDATE ${this.tableName} SET`)
             const {stringFieldAndValue, values: newValues1} = this.getFieldAndValues({initValues})
@@ -197,6 +229,14 @@ class Builder {
         }
         const {sql: sqlCriteria, values: newValues2} = this.generateCriterias({initValues: values})
         if (Array.isArray(sqlCriteria)) sql.push(...sqlCriteria)
+        if (this.t_sort) {
+            if (this.t_sort.length > 0) sql.push('ORDER BY')
+            for (const s of this.t_sort) {
+                const sortKey = s.key
+                const sortDir = s.dir
+                sql.push(`${sortKey} ${sortDir}`)
+            }
+        }
         if (this.is_select_query || this.is_update_query) {
             const limitOffsets = this.getLimitAndOffset()
             if (Array.isArray(limitOffsets)) sql.push(...(limitOffsets || []))
@@ -274,6 +314,9 @@ class Builder {
                 if (op === 'IN') {
                     sql.push(`${k0}${key} ${op} ($${sequence})${k1}`)
                     newValues.push(val.join())
+                } else if (op === 'LIKE') {
+                    sql.push(`${k0}${key} ${op} $${sequence}${k1}`)
+                    newValues.push(val)
                 } else {
                     sql.push(`${k0}${key} ${op} $${sequence}${k1}`)
                     newValues.push(val)
@@ -387,7 +430,8 @@ class BaseModel extends Builder {
                 mapValue += 1
             }
             const sql = `INSERT INTO ${this.tableName} (${keys.join()}) values (${preparedMap.join(',')})`
-            await this.fetch(sql, values)
+            const q = await this.execute(sql, values)
+            return q
         } catch (err) {
             throw err
         }
@@ -403,21 +447,33 @@ class BaseModel extends Builder {
 
     async rawQuery (sql = '', values = []) {
         try {
-            const data = await this.fetch(sql, values)
+            const data = await this.execute(sql, values)
             return data
         } catch (err) {
             throw err
         }
     }
 
-    async findOne (criteria, options = {}) {
+    async findOne (criteria = {}, options = {}) {
         try {
-            for (const field in criteria) {
-                this.where(field, criteria[field])
+            let sqlWhere = ''
+            let values = []
+            if (Object.keys(criteria).length > 0) {
+                const {sql: wh, values: v} = this.where(criteria, true)
+                sqlWhere = wh
+                values = v
             }
-            const sql = `SELECT * FROM ${this.tableName} ${this.whereClauses.join(' ')} LIMIT 1`
-            const q = await this.fetch(sql, this.values)
-            return this.getResult(q,'rows[0]', {})
+            const sql = `SELECT * FROM ${this.tableName} ${sqlWhere} LIMIT 1`
+            const q = await this.execute(sql, values)
+            return result(q,'rows[0]', {})
+        } catch (err) {
+            throw err
+        }
+    }
+
+    async findAll (criteria = {}, options = {}) {
+        try {
+            
         } catch (err) {
             throw err
         }
@@ -429,8 +485,8 @@ class BaseModel extends Builder {
                 this.where(field, criteria[field])
             }
             const sql = `SELECT * FROM ${this.tableName} ${this.whereClauses.join(' ')}`
-            const q = await this.fetch(sql, this.values)
-            return this.getResult(q,'rows', [])
+            const q = await this.execute(sql, this.values)
+            return result(q,'rows', [])
         } catch (err) {
             throw err
         }
