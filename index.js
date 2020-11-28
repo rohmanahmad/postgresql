@@ -32,6 +32,10 @@ class Builder {
     }
 
     /* RESET ALL VALUES */
+    /**
+     * @function reset
+     * @description resetting for all variables
+     */
     reset () {
         this.use_prepare_statement = false
         this.is_select_query = false
@@ -56,6 +60,10 @@ class Builder {
         if (!this.t_keys[key]) this.t_keys[key] = `$${Object.keys(this.t_keys).length}`
     }
 
+    /**
+     * @function getAllkeys
+     * @description getting valid keys in array format
+     */
     getAllkeys () {
         return Object.keys(this.schemas)
     }
@@ -72,7 +80,10 @@ class Builder {
         else if (type === 'deleteone') this.is_deleteone_query = true
         return this
     }
-
+    /**
+     * @function from
+     * @param {*} tableName 
+     */
     from (tableName = '') {
         this.fromTable = tableName
         return this
@@ -103,7 +114,6 @@ class Builder {
         if (typeof object !== 'object') throw new Error('parameter pertama harus object {key: value}')
         const type = 'and'
         for (const key in object) {
-            console.log('-->', key, object[key])
             let value = object[key]
             if (key && value) {
                 if (typeof value === 'object') {
@@ -131,7 +141,6 @@ class Builder {
             }
         }
         if (sqlReturned) {
-            console.log(this.t_where_and, this.t_where_or)
             const {sql, values} = this.generateCriterias({})
             return {sql: sql.join(' '), values}
         }
@@ -188,14 +197,24 @@ class Builder {
         return this
     }
 
+    /**
+     * @function join
+     * @param {*} type 
+     * @param {*} fromTable 
+     * @param {*} args 
+     */
     join (type = 'left', fromTable, args) {
         if (!fromTable) throw new Error('Required second paramater')
         if (!args) throw new Error('Required third paramater')
         this.t_join.push({type, fromTable, args})
-        console.log({type, fromTable, args})
         return this
     }
 
+    /**
+     * @function sort
+     * @param {*} key 
+     * @param {*} dir 
+     */
     sort (key, dir = 'DESC') {
         if (!key) throw new Error('Key Is Required For Sorting')
         this.t_sort.push({key, dir})
@@ -267,13 +286,17 @@ class Builder {
         return {stringFieldAndValue, values: val}
     }
 
-    data (data) {
+    /**
+     * @function data
+     * @param {Object} obj 
+     */
+    data (obj = {}) {
         this.field_value_object = {}
-        if (Object.keys(data).length > 0) {
+        if (Object.keys(obj).length > 0) {
             const keys = this.getAllkeys()
-            for (const f in data) {
+            for (const f in obj) {
                 if (keys.indexOf(f) > -1) {
-                    this.field_value_object[f] = data[f]
+                    this.field_value_object[f] = obj[f]
                 }
             }
         }
@@ -315,16 +338,23 @@ class Builder {
                 const k0 = '' // (s === 1 ? kurung[0] : '')
                 const k1 = '' // (s === wANDsize ? kurung[1] : '')
                 if (op === 'IN') {
-                    sql.push(`${k0}${key} ${op} ($${sequence})${k1}`)
-                    newValues.push(val.join())
+                    let allSequence = ''
+                    for (const inSeq of val) {
+                        newValues.push(inSeq)
+                        if (allSequence.length > 0) allSequence += ','
+                        allSequence += `$${sequence}`
+                        sequence += 1
+                    }
+                    sql.push(`${k0}${key} ${op} (${allSequence})${k1}`)
                 } else if (op === 'LIKE') {
                     sql.push(`${k0}${key} ${op} $${sequence}${k1}`)
                     newValues.push(val)
+                    sequence += 1
                 } else {
                     sql.push(`${k0}${key} ${op} $${sequence}${k1}`)
                     newValues.push(val)
+                    sequence += 1
                 }
-                sequence += 1
                 s += 1
             }
         }
@@ -362,7 +392,7 @@ class BaseModel extends Builder {
         this.values = []
     }
 
-    async execute (sql, values) {
+    async execute (sql, values, returnObject = false) {
         try {
             if (!sql) {
                 const builder = this.buildQuery()
@@ -371,8 +401,9 @@ class BaseModel extends Builder {
             }
             if (typeof sql !== 'string') sql = sql.join(' ')
             console.logger('running query:', {sql, values})
-            const q = await connectionPool.query(sql, values)
-            return q
+            const queryResult = await connectionPool.query(sql, values)
+            if (returnObject) return { queryResult, raw: { sql, values } }
+            return queryResult
         } catch (err) {
             console.error(err)
             return null
@@ -384,10 +415,15 @@ class BaseModel extends Builder {
      * @description standalone function
      * @param {object} criteria 
      * @param {object} updates 
-     * @param {object} options 
+     * @param {object} options {upsert}
      */
     async updateOne (criteria = {}, updates = {}, options = {}) {
         try {
+            if (options.upsert) {
+                const data = await this.findOneAndUpdate(criteria, updates, options)
+                return data
+            }
+            const dataupdate = updates['$set'] || updates
             const sqlupdate = []
             const {sql: sqlFrom, values: valFrom} = this
                 .prepare('select')
@@ -401,7 +437,7 @@ class BaseModel extends Builder {
             sqlupdate.push(')')
             const {sql, values} = this
                 .prepare('update')
-                .data(updates)
+                .data(dataupdate)
                 .from('cte') // krn menggunakan alias
                 // .where({
                 //     'cte.id': `${this.tableName}.id`
@@ -416,8 +452,32 @@ class BaseModel extends Builder {
         }
     }
 
-    async findAndUpdate(criteria = {}, update = {}, options = {}) {
+    async findOneAndUpdate(criteria = {}, update = {}, options = {}) {
+        try {
+            const data = await this.findOne(criteria)
+            if (!data) {
+                if (options.upsert === true) await this.insertOne({...update['$set'], ...update['$setOnInsert']})
+                else console.logger('Data not found and not updated!')
+            } else {
+                if (!update['$set']) throw new Error('Update need $set or $setOneInsert object')
+                await this.update({id: data.id}, update['$set'])
+            }
+        } catch (err) {
+            throw err
+        }
+    }
 
+    async update (criteria = {}, data = {}) {
+        try {
+            const d = await this
+                .prepare('update')
+                .where(criteria)
+                .data(data)
+                .execute()
+            return d
+        } catch (err) {
+            throw err
+        }
     }
 
     async insertOne (data = {}) {
@@ -481,7 +541,11 @@ class BaseModel extends Builder {
 
     async findAll (criteria = {}, options = {}) {
         try {
-            
+            return await this
+                .prepare('select')
+                .select(options.select || ['*'])
+                .where(criteria)
+                .execute()
         } catch (err) {
             throw err
         }
@@ -495,6 +559,20 @@ class BaseModel extends Builder {
             const sql = `SELECT * FROM ${this.tableName} ${this.whereClauses.join(' ')}`
             const q = await this.execute(sql, this.values)
             return result(q,'rows', [])
+        } catch (err) {
+            throw err
+        }
+    }
+
+    async count (criteria = {}) {
+        try {
+            const {sql, values} = this
+                .prepare('select')
+                .select(['COUNT(id)'], true)
+                .where(criteria)
+                .buildQuery()
+            const data = await this.execute(sql, values)
+            return parseInt(result(data, 'rows[0].count', 0))
         } catch (err) {
             throw err
         }
