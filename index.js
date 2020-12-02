@@ -455,7 +455,7 @@ class BaseModel extends Builder {
     async findOneAndUpdate(criteria = {}, update = {}, options = {}) {
         try {
             const data = await this.findOne(criteria)
-            if (!data) {
+            if (!data.id) {
                 if (options.upsert === true) await this.insertOne({...update['$set'], ...update['$setOnInsert']})
                 else console.logger('Data not found and not updated!')
             } else {
@@ -524,15 +524,17 @@ class BaseModel extends Builder {
 
     async findOne (criteria = {}, options = {}) {
         try {
-            let sqlWhere = ''
-            let values = []
-            if (Object.keys(criteria).length > 0) {
-                const {sql: wh, values: v} = this.where(criteria, true)
-                sqlWhere = wh
-                values = v
+            const isNoValidation = result(options, 'join', []).length > 0
+            let q = this
+                .select(options.select || ['*'], isNoValidation)
+            if (Object.keys(criteria).length > 0) q = q.where(criteria)
+            if (options.join) {
+                for (const j of options.join) {
+                    q = q.join(j.type, j.from, j.args)
+                }
             }
-            const sql = `SELECT * FROM ${this.tableName} ${sqlWhere} LIMIT 1`
-            const q = await this.execute(sql, values)
+            q = q.limit(1)
+            q = await q.execute()
             return result(q,'rows[0]', {})
         } catch (err) {
             throw err
@@ -541,12 +543,14 @@ class BaseModel extends Builder {
 
     async findAll (criteria = {}, options = {}) {
         try {
-            return await this
+            const isNoValidation = result(options, 'join', []).length > 0
+            const data = await this
                 .prepare('select')
-                .select(options.select || ['*'])
+                .select(options.select || ['*'], isNoValidation)
                 .where(criteria)
                 .execute()
-        } catch (err) {
+            return result(data, 'rows', [])
+            } catch (err) {
             throw err
         }
     }
