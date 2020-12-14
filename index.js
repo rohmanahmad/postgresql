@@ -347,8 +347,8 @@ class Builder {
                     }
                     sql.push(`${k0}${key} ${op} (${allSequence})${k1}`)
                 } else if (op === 'LIKE') {
-                    sql.push(`${k0}${key} ${op} $${sequence}${k1}`)
-                    newValues.push(val)
+                    sql.push(`${k0}LOWER(${key}) ${op} LOWER($${sequence})${k1}`)
+                    /newValues.push(val)
                     sequence += 1
                 } else {
                     sql.push(`${k0}${key} ${op} $${sequence}${k1}`)
