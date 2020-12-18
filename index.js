@@ -462,6 +462,7 @@ class BaseModel extends Builder {
                 if (!update['$set']) throw new Error('Update need $set or $setOneInsert object')
                 await this.update({id: data.id}, update['$set'])
             }
+            return data
         } catch (err) {
             throw err
         }
