@@ -7,6 +7,7 @@ const connectionPool = new Pool({
 const {result} = require('lodash')
 const acceptedOperators = [
     '$eq',
+    '$ne',
     '$lt',
     '$lte',
     '$gt',
@@ -18,6 +19,7 @@ const acceptedOperators = [
 ]
 const operatorsMap = {
     '$eq': '=',
+    '$ne': '<>',
     '$lt': '<',
     '$lte': '<=',
     '$gt': '>',
@@ -78,6 +80,7 @@ class Builder {
         if (type === 'select') this.is_select_query = true
         else if (type === 'update') this.is_update_query = true
         else if (type === 'deleteone') this.is_deleteone_query = true
+        else if (type === 'remove') this.is_remove_query = true
         return this
     }
     /**
@@ -246,7 +249,7 @@ class Builder {
             if (this.fromTable) sql.push(`FROM ${this.fromTable}`)
             // untuk updateone tidak di masukkan where disini, krn harus select one dlu lalu di update
             // untuk update yg many, tidak ada masalah menggunakan .where()
-        } else if (this.is_deleteone_query) {
+        } else if (this.is_deleteone_query || this.is_remove_query) {
             sql.push(`DELETE FROM ${this.tableName}`)
         }
         const {sql: sqlCriteria, values: newValues2} = this.generateCriterias({initValues: values})
@@ -427,7 +430,7 @@ class BaseModel extends Builder {
             const sqlupdate = []
             const {sql: sqlFrom, values: valFrom} = this
                 .prepare('select')
-                .select(['id'])
+                .select(['_id'])
                 .limit(1)
                 .where(criteria) // preparing where statement for selecting data
                 .buildQuery({}) // values(type Array) akan melanjutkan urutan sesuai size yg sudah didefinisikan
@@ -444,7 +447,7 @@ class BaseModel extends Builder {
                 // })
                 .buildQuery({initValues: valFrom})
             if (Array.isArray(sql)) sqlupdate.push(...sql)
-            sqlupdate.push(`WHERE cte.id = ${this.tableName}.id`)
+            sqlupdate.push(`WHERE cte._id = ${this.tableName}._id`)
             const data = await this.execute(sqlupdate, values)
             return data
         } catch (err) {
@@ -487,15 +490,16 @@ class BaseModel extends Builder {
             let values = []
             let preparedMap = []
             let mapValue = 1
+            data['_id'] = md5(`${this.tableName}_${new Date().getTime()}`)
             for (const key in data) {
                 keys.push(key)
                 values.push(data[key])
                 preparedMap.push(`$${mapValue}`)
                 mapValue += 1
             }
-            const sql = `INSERT INTO ${this.tableName} (${keys.join()}) values (${preparedMap.join(',')}) RETURNING id`
+            const sql = `INSERT INTO ${this.tableName} (${keys.join()}) values (${preparedMap.join(',')}) RETURNING _id`
             const q = await this.execute(sql, values)
-            return result(q, 'rows[0].id', null)
+            return result(q, 'rows[0]._id', null)
         } catch (err) {
             throw err
         }
@@ -508,6 +512,18 @@ class BaseModel extends Builder {
                 .prepare('deleteone')
                 .where(criterias)
                 .limit(1)
+                .execute()
+        } catch (err) {
+            throw err
+        }
+    }
+
+    async remove (criterias = {}) {
+        try {
+            if (Object.keys(criterias).length === 0) throw new Error('DeleteOne Need atlease One criteria')
+            await this
+                .prepare('remove')
+                .where(criterias)
                 .execute()
         } catch (err) {
             throw err
@@ -573,7 +589,7 @@ class BaseModel extends Builder {
         try {
             const {sql, values} = this
                 .prepare('select')
-                .select(['COUNT(id)'], true)
+                .select(['COUNT(_id)'], true)
                 .where(criteria)
                 .buildQuery()
             const data = await this.execute(sql, values)
