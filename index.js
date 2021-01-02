@@ -4,6 +4,7 @@ const {Pool} = require('pg')
 const connectionPool = new Pool({
     connectionString: process.env.POSTGRESQL_DSN
 })
+const md5 = require('md5')
 const {result} = require('lodash')
 const acceptedOperators = [
     '$eq',
@@ -118,7 +119,7 @@ class Builder {
         const type = 'and'
         for (const key in object) {
             let value = object[key]
-            if (key && value) {
+            if (key && (value || value === 0)) {
                 if (typeof value === 'object') {
                     // cek apakah sesuai dengan acceptedOperators
                     const opType = Object.keys(value)[0]
