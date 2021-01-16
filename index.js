@@ -406,11 +406,11 @@ class BaseModel extends Builder {
             if (typeof sql !== 'string') sql = sql.join(' ')
             console.logger('running query:', {sql, values})
             const queryResult = await connectionPool.query(sql, values)
-            if (returnObject) return { queryResult, raw: { sql, values } }
-            return queryResult
+            return { queryResult, raw: { sql, values } }
+            // if (returnObject) 
+            // return queryResult
         } catch (err) {
-            console.error(err)
-            return null
+            throw err
         }
     }
 
@@ -498,9 +498,12 @@ class BaseModel extends Builder {
                 preparedMap.push(`$${mapValue}`)
                 mapValue += 1
             }
-            const sql = `INSERT INTO ${this.tableName} (${keys.join()}) values (${preparedMap.join(',')}) RETURNING _id`
-            const q = await this.execute(sql, values)
-            return result(q, 'rows[0]._id', null)
+            const sql = `INSERT INTO ${this.tableName} (${keys.join()}) values (${preparedMap.join(',')}) RETURNING id`
+            const query = await this.execute(sql, values)
+            return {
+                id: result(query, 'rows[0].id', null),
+                _id: data._id
+            }
         } catch (err) {
             throw err
         }
@@ -552,8 +555,8 @@ class BaseModel extends Builder {
                 }
             }
             q = q.limit(1)
-            q = await q.execute()
-            return result(q,'rows[0]', {})
+            const {queryResult} = await q.execute()
+            return result(queryResult, 'rows[0]', {})
         } catch (err) {
             throw err
         }
@@ -562,12 +565,12 @@ class BaseModel extends Builder {
     async findAll (criteria = {}, options = {}) {
         try {
             const isNoValidation = result(options, 'join', []).length > 0
-            const data = await this
+            const {queryResult} = await this
                 .prepare('select')
                 .select(options.select || ['*'], isNoValidation)
                 .where(criteria)
                 .execute()
-            return result(data, 'rows', [])
+            return result(queryResult, 'rows', [])
             } catch (err) {
             throw err
         }
@@ -593,8 +596,8 @@ class BaseModel extends Builder {
                 .select(['COUNT(_id)'], true)
                 .where(criteria)
                 .buildQuery()
-            const data = await this.execute(sql, values)
-            return parseInt(result(data, 'rows[0].count', 0))
+            const {queryResult} = await this.execute(sql, values)
+            return parseInt(result(queryResult, 'rows[0].count', 0))
         } catch (err) {
             throw err
         }
