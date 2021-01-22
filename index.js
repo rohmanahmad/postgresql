@@ -450,7 +450,7 @@ class BaseModel extends Builder {
             if (Array.isArray(sql)) sqlupdate.push(...sql)
             sqlupdate.push(`WHERE cte._id = ${this.tableName}._id`)
             const data = await this.execute(sqlupdate, values)
-            return data
+            return {data, actions: {selectedAction: 'update'}}
         } catch (err) {
             throw err
         }
@@ -459,14 +459,24 @@ class BaseModel extends Builder {
     async findOneAndUpdate(criteria = {}, update = {}, options = {}) {
         try {
             const data = await this.findOne(criteria)
+            let actions = {}
+            let newData = {...data}
             if (!data.id) {
-                if (options.upsert === true) await this.insertOne({...update['$set'], ...update['$setOnInsert']})
-                else console.logger('Data not found and not updated!')
+                if (options.upsert === true) {
+                    const n = {...update['$set'], ...update['$setOnInsert']}
+                    await this.insertOne(n)
+                    actions['selectedAction'] = 'insert'
+                    newData = {...newData, ...n}
+                } else {
+                    console.logger('Data not found and not updated!')
+                }
             } else {
                 if (!update['$set']) throw new Error('Update need $set or $setOneInsert object')
                 await this.update({id: data.id}, update['$set'])
+                actions['selectedAction'] = 'update'
+                newData = {...newData, ...update['$set']}
             }
-            return data
+            return {data: newData, actions}
         } catch (err) {
             throw err
         }
@@ -499,9 +509,9 @@ class BaseModel extends Builder {
                 mapValue += 1
             }
             const sql = `INSERT INTO ${this.tableName} (${keys.join()}) values (${preparedMap.join(',')}) RETURNING id`
-            const query = await this.execute(sql, values)
+            const {queryResult} = await this.execute(sql, values)
             return {
-                id: result(query, 'rows[0].id', null),
+                id: result(queryResult, 'rows[0].id', null),
                 _id: data._id
             }
         } catch (err) {
