@@ -407,8 +407,6 @@ class BaseModel extends Builder {
             console.logger('running query:', {sql, values})
             const queryResult = await connectionPool.query(sql, values)
             return { queryResult, raw: { sql, values } }
-            // if (returnObject) 
-            // return queryResult
         } catch (err) {
             throw err
         }
@@ -522,7 +520,7 @@ class BaseModel extends Builder {
     async deleteOne (criterias = {}) {
         try {
             if (Object.keys(criterias).length === 0) throw new Error('DeleteOne Need atlease One criteria')
-            await this
+            return await this
                 .prepare('deleteone')
                 .where(criterias)
                 .limit(1)
