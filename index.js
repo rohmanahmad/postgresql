@@ -499,7 +499,7 @@ class BaseModel extends Builder {
             let values = []
             let preparedMap = []
             let mapValue = 1
-            data['_id'] = md5(`${this.tableName}_${new Date().getTime()}`)
+            if (!data['_id']) data['_id'] = md5(`${this.tableName}_${new Date().getTime()}`)
             for (const key in data) {
                 keys.push(key)
                 values.push(data[key])
