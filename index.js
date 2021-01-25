@@ -573,12 +573,15 @@ class BaseModel extends Builder {
     async findAll (criteria = {}, options = {}) {
         try {
             const isNoValidation = result(options, 'join', []).length > 0
-            const {queryResult} = await this
+            const {queryResult, raw} = await this
                 .prepare('select')
                 .select(options.select || ['*'], isNoValidation)
                 .where(criteria)
                 .execute()
-            return result(queryResult, 'rows', [])
+            return {
+                data: result(queryResult, 'rows', []),
+                raw
+            }
             } catch (err) {
             throw err
         }
