@@ -570,6 +570,16 @@ class BaseModel extends Builder {
         }
     }
 
+    async findOneAndDelete (criteria) {
+        try {
+            const data = await this.findOne(criteria)
+            await this.deleteOne(criteria)
+            return data
+        } catch (err) {
+            throw err
+        }
+    }
+
     async findAll (criteria = {}, options = {}) {
         try {
             const isNoValidation = result(options, 'join', []).length > 0
