@@ -97,13 +97,16 @@ class Builder {
      * @param {array} keys default new Array('*')
      * @description setup keys / fields which used to view
      */
-    select (keys = ['*'], noValidation = false) {
+    select (keys, noValidation = false) {
         this.is_select_query = true // untuk pengecekan dari builder
-        const allKeys = this.getAllkeys()
-        for (const k of keys) {
-            const key = k.split('.')[1] || k.split('.')[0]
-            if (k === '*' || allKeys.indexOf(key) > -1 || noValidation) {
-                this.t_select.push(k)
+        if (this.t_select.length === 0 && !keys) this.t_select.push('*')
+        if (keys) {
+            const allKeys = this.getAllkeys()
+            for (const k of keys) {
+                const key = k.split('.')[1] || k.split('.')[0]
+                if (k === '*' || allKeys.indexOf(key) > -1 || noValidation) {
+                    this.t_select.push(k)
+                }
             }
         }
         return this
@@ -408,7 +411,7 @@ class BaseModel extends Builder {
             const queryResult = await connectionPool.query(sql, values)
             return { queryResult, raw: { sql, values } }
         } catch (err) {
-            throw err
+            throw new Error(err.message)
         }
     }
 
@@ -448,7 +451,7 @@ class BaseModel extends Builder {
             if (Array.isArray(sql)) sqlupdate.push(...sql)
             sqlupdate.push(`WHERE cte._id = ${this.tableName}._id`)
             const data = await this.execute(sqlupdate, values)
-            return {data, actions: {selectedAction: 'update'}}
+            return data
         } catch (err) {
             throw err
         }
@@ -456,10 +459,10 @@ class BaseModel extends Builder {
 
     async findOneAndUpdate(criteria = {}, update = {}, options = {}) {
         try {
-            const data = await this.findOne(criteria)
+            const {queryResult} = await this.findOne(criteria)
             let actions = {}
-            let newData = {...data}
-            if (!data.id) {
+            let newData = {...queryResult}
+            if (!queryResult.id) {
                 if (options.upsert === true) {
                     const n = {...update['$set'], ...update['$setOnInsert']}
                     await this.insertOne(n)
@@ -470,7 +473,7 @@ class BaseModel extends Builder {
                 }
             } else {
                 if (!update['$set']) throw new Error('Update need $set or $setOneInsert object')
-                await this.update({id: data.id}, update['$set'])
+                await this.update({id: queryResult.id}, update['$set'])
                 actions['selectedAction'] = 'update'
                 newData = {...newData, ...update['$set']}
             }
@@ -555,7 +558,7 @@ class BaseModel extends Builder {
         try {
             const isNoValidation = result(options, 'join', []).length > 0
             let q = this
-                .select(options.select || ['*'], isNoValidation)
+                .select(options.select, isNoValidation)
             if (Object.keys(criteria).length > 0) q = q.where(criteria)
             if (options.join) {
                 for (const j of options.join) {
@@ -563,8 +566,8 @@ class BaseModel extends Builder {
                 }
             }
             q = q.limit(1)
-            const {queryResult} = await q.execute()
-            return result(queryResult, 'rows[0]', {})
+            const {queryResult, raw} = await q.execute()
+            return {queryResult: result(queryResult, 'rows[0]', {}), raw}
         } catch (err) {
             throw err
         }
@@ -572,9 +575,9 @@ class BaseModel extends Builder {
 
     async findOneAndDelete (criteria) {
         try {
-            const data = await this.findOne(criteria)
+            const {queryResult} = await this.findOne(criteria)
             await this.deleteOne(criteria)
-            return data
+            return queryResult
         } catch (err) {
             throw err
         }
