@@ -260,11 +260,13 @@ class Builder {
         if (Array.isArray(sqlCriteria)) sql.push(...sqlCriteria)
         if (this.t_sort) {
             if (this.t_sort.length > 0) sql.push('ORDER BY')
+            let sortingSQL = []
             for (const s of this.t_sort) {
                 const sortKey = s.key
                 const sortDir = s.dir
-                sql.push(`${sortKey} ${sortDir}`)
+                sortingSQL.push(`${sortKey} ${sortDir}`)
             }
+            sql.push(sortingSQL.join(','))
         }
         if (this.is_select_query || this.is_update_query) {
             const limitOffsets = this.getLimitAndOffset()
