@@ -505,6 +505,7 @@ class BaseModel extends Builder {
             let preparedMap = []
             let mapValue = 1
             if (!data['_id']) data['_id'] = md5(`${this.tableName}_${new Date().getTime()}`)
+            if (this.schemas['created_at'] && !data.created_at) data.created_at = new Date()
             for (const key in data) {
                 keys.push(key)
                 values.push(data[key])
