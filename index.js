@@ -442,6 +442,7 @@ class BaseModel extends Builder {
             sqlupdate.push('(')
             if (Array.isArray(sqlFrom)) sqlupdate.push(...sqlFrom)
             sqlupdate.push(')')
+            if (this.schemas.updated_at && !dataupdate.updated_at) dataupdate.updated_at = new Date()
             const {sql, values} = this
                 .prepare('update')
                 .data(dataupdate)
