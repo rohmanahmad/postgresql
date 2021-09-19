@@ -1,5 +1,22 @@
 'use strict'
 
+/**
+ * available operations:
+ * - execute
+ * - updateOne
+ * - findOneAndUpdate
+ * - update
+ * - insertOne
+ * - deleteOne
+ * - deleteMany
+ * - remove
+ * - rawQuery
+ * - findOne
+ * - findOneAndDelete
+ * - findAll
+ * - findBy
+ * - count
+ */
 const {Pool} = require('pg')
 const connectionPool = new Pool({
     connectionString: process.env.POSTGRESQL_DSN
@@ -537,9 +554,19 @@ class BaseModel extends Builder {
         }
     }
 
+    async deleteMany (criterias = {}) {
+        try {
+            await this
+                .prepare('remove')
+                .where(criterias)
+                .execute()
+        } catch (err) {
+            throw err
+        }
+    }
+
     async remove (criterias = {}) {
         try {
-            if (Object.keys(criterias).length === 0) throw new Error('DeleteOne Need atlease One criteria')
             await this
                 .prepare('remove')
                 .where(criterias)
